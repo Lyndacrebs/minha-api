@@ -52,7 +52,7 @@ jobs:
             ${{ secrets.DOCKERHUB_USERNAME }}/senai_fastapi:latest
             ${{ secrets.DOCKERHUB_USERNAME }}/senai_fastapi:${{ github.sha }}
 
-  # 3. DEPLOY EM HOMOLOGAÇÃO (Inicia automaticamente em pushes para a branch 'develop')
+  # 3. DEPLOY EM HOMOLOGAÇÃO
   deploy_homologacao:
     needs: build_and_push_docker
     if: github.ref == 'refs/heads/develop'
@@ -69,7 +69,7 @@ jobs:
             docker pull ${{ secrets.DOCKERHUB_USERNAME }}/senai_fastapi:latest
             docker stop senai_fastapi_homolog 2>/dev/null || true
             docker rm senai_fastapi_homolog 2>/dev/null || true
-            docker run -d --name senai_fastapi_homolog -p 8080:8080 --restart unless-stopped ${{ secrets.DOCKERHUB_USERNAME }}/senai_fastapi:latest
+            docker run -d --name senai_fastapi_homolog -p 8081:8080 --restart unless-stopped ${{ secrets.DOCKERHUB_USERNAME }}/senai_fastapi:latest
 
   # 4. DEPLOY EM PRODUÇÃO (Inicia em pushes para a branch 'main' e exige aprovação manual no GitHub)
   deploy_producao:
