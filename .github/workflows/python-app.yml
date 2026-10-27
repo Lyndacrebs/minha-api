@@ -1,0 +1,91 @@
+name: CI/CD Pipeline - LAB 9.1
+
+on:
+  push:
+    branches: [ "main", "develop" ]
+  pull_request:
+    branches: [ "main", "develop" ]
+
+jobs:
+  # 1. ETAPA DE BUILD E TESTES (Roda em PRs e Pushes para develop/main)
+  build_and_test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Executar testes com pytest
+        run: |
+          PYTHONPATH=. pytest tests/ -v --tb=short
+
+  # 2. ETAPA DE BUILD E PUSH DOCKER (Gera imagem no Docker Hub)
+  build_and_push_docker:
+    needs: build_and_test
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Login no Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build e Push Docker
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/senai_fastapi:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/senai_fastapi:${{ github.sha }}
+
+  # 3. DEPLOY EM HOMOLOGAÇÃO
+  deploy_homologacao:
+    needs: build_and_push_docker
+    if: github.ref == 'refs/heads/develop'
+    environment: homologacao
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH na EC2 (Homologação)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/senai_fastapi:latest
+            docker stop senai_fastapi_homolog 2>/dev/null || true
+            docker rm senai_fastapi_homolog 2>/dev/null || true
+            docker run -d --name senai_fastapi_homolog -p 8081:8080 --restart unless-stopped ${{ secrets.DOCKERHUB_USERNAME }}/senai_fastapi:latest
+
+  # 4. DEPLOY EM PRODUÇÃO (Inicia em pushes para a branch 'main' e exige aprovação manual no GitHub)
+  deploy_producao:
+    needs: build_and_push_docker
+    if: github.ref == 'refs/heads/main'
+    environment: producao
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH na EC2 (Produção)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/senai_fastapi:latest
+            docker stop senai_fastapi 2>/dev/null || true
+            docker rm senai_fastapi 2>/dev/null || true
+            docker run -d --name senai_fastapi -p 8080:8080 --restart unless-stopped ${{ secrets.DOCKERHUB_USERNAME }}/senai_fastapi:latest
